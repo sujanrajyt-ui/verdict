@@ -721,3 +721,36 @@ VALUES
     "whatsapp_configured": false,
     "email_configured": false
 }'::jsonb);
+
+-- ============================================================================
+-- 7. STORAGE BUCKETS & SECURITY POLICIES
+-- ============================================================================
+INSERT INTO storage.buckets (id, name, public)
+VALUES 
+    ('payment-screenshots', 'payment-screenshots', false),
+    ('event-assets', 'event-assets', true)
+ON CONFLICT (id) DO NOTHING;
+
+-- Storage Policy: Authenticated participants can upload payment screenshots
+CREATE POLICY "Authenticated users can upload payment screenshots"
+ON storage.objects FOR INSERT
+TO authenticated
+WITH CHECK (bucket_id = 'payment-screenshots');
+
+-- Storage Policy: Users can view their own payment screenshots, Admins can view all
+CREATE POLICY "Users and admins can view payment screenshots"
+ON storage.objects FOR SELECT
+TO authenticated
+USING (
+    bucket_id = 'payment-screenshots' 
+    AND (
+        auth.uid()::text = (storage.foldername(name))[1] 
+        OR EXISTS (SELECT 1 FROM profiles WHERE profiles.auth_user_id = auth.uid() AND profiles.role = 'admin')
+    )
+);
+
+-- Storage Policy: Public can view event assets (QR codes, logos)
+CREATE POLICY "Public read event assets"
+ON storage.objects FOR SELECT
+TO public
+USING (bucket_id = 'event-assets');

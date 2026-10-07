@@ -36,6 +36,9 @@ export const RevealPage: React.FC = () => {
       try {
         const reg = await dataService.getRegistrationForUser(user.auth_user_id);
         setRegistrationDetail(reg);
+        if (reg?.reveal?.mode === 'SIMPLE') {
+          setSequenceStage('REVEALED');
+        }
       } catch (err) {
         console.error('Error fetching reveal data', err);
       } finally {

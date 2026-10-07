@@ -20,11 +20,24 @@ import { AdminReveals } from './AdminReveals';
 import { AdminExports } from './AdminExports';
 import { AdminSettings } from './AdminSettings';
 
+type AdminTab = 'overview' | 'registrations' | 'payments' | 'committees' | 'portfolios' | 'assignments' | 'reveals' | 'exports' | 'settings';
+
+const getTabFromPath = (path: string): AdminTab => {
+  const p = path.toLowerCase();
+  if (p.includes('/admin/registrations')) return 'registrations';
+  if (p.includes('/admin/payments')) return 'payments';
+  if (p.includes('/admin/committees')) return 'committees';
+  if (p.includes('/admin/portfolios')) return 'portfolios';
+  if (p.includes('/admin/assignments')) return 'assignments';
+  if (p.includes('/admin/reveals')) return 'reveals';
+  if (p.includes('/admin/exports')) return 'exports';
+  if (p.includes('/admin/settings')) return 'settings';
+  return 'overview';
+};
+
 export const AdminPage: React.FC = () => {
   const { user } = useAuth();
-  const [activeTab, setActiveTab] = useState<
-    'overview' | 'registrations' | 'payments' | 'committees' | 'portfolios' | 'assignments' | 'reveals' | 'exports' | 'settings'
-  >('overview');
+  const [activeTab, setActiveTab] = useState<AdminTab>(() => getTabFromPath(window.location.pathname));
 
   const [loading, setLoading] = useState(true);
   const [registrations, setRegistrations] = useState<FullRegistrationDetail[]>([]);
@@ -32,6 +45,22 @@ export const AdminPage: React.FC = () => {
   const [pricingRules, setPricingRules] = useState<PricingRule[]>([]);
   const [portfolios, setPortfolios] = useState<Portfolio[]>([]);
   const [appSettings, setAppSettings] = useState<AppSettings | null>(null);
+
+  useEffect(() => {
+    const handlePopState = () => {
+      setActiveTab(getTabFromPath(window.location.pathname));
+    };
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
+
+  const handleSelectTab = (tab: AdminTab) => {
+    setActiveTab(tab);
+    const targetPath = tab === 'overview' ? '/admin' : `/admin/${tab}`;
+    if (window.location.pathname !== targetPath) {
+      window.history.pushState({}, '', targetPath);
+    }
+  };
 
   const fetchAdminData = async () => {
     try {
@@ -62,7 +91,6 @@ export const AdminPage: React.FC = () => {
   const handleVerifyPayment = async (paymentId: string) => {
     try {
       const updated = await dataService.verifyPayment(paymentId, user?.auth_user_id);
-      // Dispatch notification
       notificationService.sendEmail({
         toEmail: updated.registration.contact_email,
         recipientName: updated.individual?.full_name || updated.team?.team_name || 'Delegate',
@@ -120,12 +148,12 @@ export const AdminPage: React.FC = () => {
   }
 
   return (
-    <AdminLayout activeTab={activeTab} onSelectTab={setActiveTab}>
+    <AdminLayout activeTab={activeTab} onSelectTab={handleSelectTab}>
       {activeTab === 'overview' && (
         <AdminOverview
           registrations={registrations}
           committees={committees}
-          onNavigateTab={setActiveTab}
+          onNavigateTab={handleSelectTab}
         />
       )}
 

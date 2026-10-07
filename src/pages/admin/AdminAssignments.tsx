@@ -30,6 +30,7 @@ export const AdminAssignments: React.FC<AdminAssignmentsProps> = ({
   const [selectedCommitteeId, setSelectedCommitteeId] = useState<string>(
     committees[0]?.id || ''
   );
+  const [assignmentMode, setAssignmentMode] = useState<'AUTO_BALANCED' | 'MANUAL_CAPACITY'>('AUTO_BALANCED');
   const [isRunning, setIsRunning] = useState<boolean>(false);
   const [confirmResetOpen, setConfirmResetOpen] = useState<boolean>(false);
   const [manualModalOpen, setManualModalOpen] = useState<boolean>(false);
@@ -50,9 +51,9 @@ export const AdminAssignments: React.FC<AdminAssignmentsProps> = ({
     setIsRunning(true);
     setStatusMsg(null);
     try {
-      const res = await dataService.runAutoAssignment(selectedCommitteeId, 'AUTO_BALANCED');
+      const res = await dataService.runAutoAssignment(selectedCommitteeId, assignmentMode);
       setStatusMsg({
-        text: `Assignment Engine executed successfully. Allocated ${res.assignedCount} participants.`,
+        text: `Assignment Engine executed successfully (${assignmentMode === 'AUTO_BALANCED' ? 'Balanced Mode' : 'Manual Capacity Mode'}). Allocated ${res.assignedCount} participants.`,
       });
       onRefresh();
     } catch (err: any) {
@@ -108,7 +109,16 @@ export const AdminAssignments: React.FC<AdminAssignmentsProps> = ({
         </div>
 
         {/* Global Controls */}
-        <div className="flex items-center space-x-3">
+        <div className="flex flex-wrap items-center gap-3">
+          <select
+            value={assignmentMode}
+            onChange={(e) => setAssignmentMode(e.target.value as any)}
+            className="bg-black/60 border border-white/10 rounded-lg px-3 py-2 text-xs font-mono-code text-zinc-300 focus:outline-none focus:border-red-600"
+          >
+            <option value="AUTO_BALANCED">Mode: Automatic Balancing</option>
+            <option value="MANUAL_CAPACITY">Mode: Manual Capacity Limits</option>
+          </select>
+
           <button
             type="button"
             disabled={isRunning || unassignedRegs.length === 0}

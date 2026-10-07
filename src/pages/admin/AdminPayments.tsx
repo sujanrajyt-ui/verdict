@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { FullRegistrationDetail } from '../../types';
+import { FullRegistrationDetail, Payment } from '../../types';
 import { formatCurrency } from '../../utils/pricing';
+import { dataService } from '../../services/dataService';
 import { 
   CheckCircle, 
   XCircle, 
@@ -10,7 +11,8 @@ import {
   X,
   CreditCard,
   Clock,
-  ShieldCheck
+  ShieldCheck,
+  Edit2
 } from 'lucide-react';
 
 interface AdminPaymentsProps {
@@ -29,6 +31,9 @@ export const AdminPayments: React.FC<AdminPaymentsProps> = ({
   const [activeFilter, setActiveFilter] = useState<'SUBMITTED' | 'VERIFIED' | 'REJECTED' | 'ALL'>('SUBMITTED');
   const [inspectScreenshotUrl, setInspectScreenshotUrl] = useState<string | null>(null);
   const [processingId, setProcessingId] = useState<string | null>(null);
+  const [overrideModalPayment, setOverrideModalPayment] = useState<Payment | null>(null);
+  const [overrideAmount, setOverrideAmount] = useState<number>(0);
+  const [overrideReason, setOverrideReason] = useState<string>('');
 
   // Collect all payment records
   const paymentRows = registrations
@@ -48,12 +53,28 @@ export const AdminPayments: React.FC<AdminPaymentsProps> = ({
   };
 
   const handleReject = async (paymentId: string) => {
-    const reason = prompt('Enter payment rejection / resubmission reason:') || 'UTR mismatch or unreadable receipt';
+    const reason = prompt('Enter payment rejection / resubmission reason (optional):') || 'UTR mismatch or unreadable receipt';
     setProcessingId(paymentId);
     try {
       await onRejectPayment(paymentId, reason);
     } finally {
       setProcessingId(null);
+    }
+  };
+
+  const handleSaveOverride = async () => {
+    if (!overrideModalPayment) return;
+    try {
+      await dataService.overridePaymentAmount(
+        overrideModalPayment.id,
+        overrideAmount,
+        overrideReason || 'Administrative Fee Adjustment'
+      );
+      setOverrideModalPayment(null);
+      setOverrideReason('');
+      onRefresh();
+    } catch (e) {
+      console.error(e);
     }
   };
 
@@ -138,7 +159,14 @@ export const AdminPayments: React.FC<AdminPaymentsProps> = ({
                     </td>
 
                     <td className="py-3 px-4">
-                      <span className="font-bold text-white block">{formatCurrency(pay.amount)}</span>
+                      <div className="flex items-center space-x-1.5">
+                        <span className="font-bold text-white block">{formatCurrency(pay.amount)}</span>
+                        {pay.override_amount && (
+                          <span className="text-[9px] bg-red-950 text-red-400 border border-red-800 px-1 rounded">
+                            OVERRIDDEN
+                          </span>
+                        )}
+                      </div>
                       <span className="text-[10px] text-zinc-500 uppercase">{pay.pricing_category}</span>
                     </td>
 
@@ -176,28 +204,40 @@ export const AdminPayments: React.FC<AdminPaymentsProps> = ({
                     </td>
 
                     <td className="py-3 px-4 text-right">
-                      {isPending ? (
-                        <div className="flex items-center justify-end space-x-2">
-                          <button
-                            type="button"
-                            disabled={processingId === pay.id}
-                            onClick={() => handleVerify(pay.id)}
-                            className="px-3 py-1.5 rounded bg-emerald-800 hover:bg-emerald-700 text-white font-bold text-[11px] uppercase tracking-wider transition-colors disabled:opacity-50"
-                          >
-                            VERIFY
-                          </button>
-                          <button
-                            type="button"
-                            disabled={processingId === pay.id}
-                            onClick={() => handleReject(pay.id)}
-                            className="px-3 py-1.5 rounded bg-red-900 hover:bg-red-800 text-red-200 text-[11px] uppercase tracking-wider transition-colors disabled:opacity-50"
-                          >
-                            REJECT
-                          </button>
-                        </div>
-                      ) : (
-                        <span className="text-zinc-600 text-[11px]">PROCESSED</span>
-                      )}
+                      <div className="flex items-center justify-end space-x-2">
+                        {isPending && (
+                          <>
+                            <button
+                              type="button"
+                              disabled={processingId === pay.id}
+                              onClick={() => handleVerify(pay.id)}
+                              className="px-3 py-1.5 rounded bg-emerald-800 hover:bg-emerald-700 text-white font-bold text-[11px] uppercase tracking-wider transition-colors disabled:opacity-50"
+                            >
+                              VERIFY
+                            </button>
+                            <button
+                              type="button"
+                              disabled={processingId === pay.id}
+                              onClick={() => handleReject(pay.id)}
+                              className="px-3 py-1.5 rounded bg-red-900 hover:bg-red-800 text-red-200 text-[11px] uppercase tracking-wider transition-colors disabled:opacity-50"
+                            >
+                              REJECT
+                            </button>
+                          </>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setOverrideModalPayment(pay);
+                            setOverrideAmount(pay.amount);
+                            setOverrideReason(pay.override_reason || '');
+                          }}
+                          className="p-1.5 rounded bg-zinc-900 hover:bg-zinc-800 border border-white/10 text-zinc-400 hover:text-white"
+                          title="Override Payable Amount"
+                        >
+                          <Edit2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 );
@@ -206,6 +246,73 @@ export const AdminPayments: React.FC<AdminPaymentsProps> = ({
           </tbody>
         </table>
       </div>
+
+      {/* Fee Override Modal (Section 13 Pricing Rules) */}
+      {overrideModalPayment && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fadeIn">
+          <div className="w-full max-w-md rounded-2xl border border-white/15 bg-zinc-950 p-6 space-y-4 text-left">
+            <div className="flex items-center justify-between pb-3 border-b border-white/10">
+              <h3 className="font-cinzel text-base font-bold text-white uppercase">
+                ADMIN FEE OVERRIDE
+              </h3>
+              <button
+                type="button"
+                onClick={() => setOverrideModalPayment(null)}
+                className="text-zinc-400 hover:text-white"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-3 text-xs font-mono-code">
+              <div>
+                <span className="text-zinc-500 uppercase block">Current Amount</span>
+                <span className="text-white font-bold text-base">
+                  {formatCurrency(overrideModalPayment.original_amount || overrideModalPayment.amount)}
+                </span>
+              </div>
+
+              <div>
+                <label className="block text-zinc-400 uppercase mb-1">New Override Amount (INR)</label>
+                <input
+                  type="number"
+                  value={overrideAmount}
+                  onChange={(e) => setOverrideAmount(Number(e.target.value))}
+                  className="w-full bg-black/70 border border-white/10 rounded px-3 py-2 text-white font-bold text-base"
+                />
+              </div>
+
+              <div>
+                <label className="block text-zinc-400 uppercase mb-1">Reason for Adjustment</label>
+                <input
+                  type="text"
+                  placeholder="e.g. Approved Scholarship or Concession"
+                  value={overrideReason}
+                  onChange={(e) => setOverrideReason(e.target.value)}
+                  className="w-full bg-black/70 border border-white/10 rounded px-3 py-2 text-white"
+                />
+              </div>
+            </div>
+
+            <div className="pt-4 flex justify-end space-x-2">
+              <button
+                type="button"
+                onClick={() => setOverrideModalPayment(null)}
+                className="px-4 py-2 rounded border border-white/10 text-xs font-mono-code text-zinc-400"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveOverride}
+                className="px-6 py-2 rounded bg-red-700 hover:bg-red-600 text-white text-xs font-mono-code font-bold uppercase"
+              >
+                Save Override
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* High-Resolution Screenshot Inspector Modal */}
       {inspectScreenshotUrl && (
