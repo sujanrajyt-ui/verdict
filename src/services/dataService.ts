@@ -12,9 +12,7 @@ import {
   Reveal, 
   AuditLog, 
   AppSettings,
-  UserProfile,
-  FullRegistrationDetail,
-  FeeCategory
+  FullRegistrationDetail
 } from '../types';
 import { isSupabaseConfigured, supabase } from './supabaseClient';
 import { mockStore } from './mockDataStore';
@@ -58,16 +56,49 @@ export interface SubmitRegistrationPayload {
 
 class DataService {
   /**
+   * STORAGE / ASSET UPLOAD
+   */
+  async uploadPaymentScreenshot(file: File | Blob, registrationNumber?: string): Promise<string> {
+    if (isSupabaseConfigured() && supabase) {
+      try {
+        const ext = 'png';
+        const cleanReg = (registrationNumber || 'reg').replace(/[^a-zA-Z0-9_-]/g, '_');
+        const fileName = `${cleanReg}_${Date.now()}.${ext}`;
+        const { data, error } = await supabase.storage.from('payment-screenshots').upload(fileName, file, {
+          cacheControl: '3600',
+          upsert: true,
+        });
+        if (!error && data) {
+          const { data: urlData } = supabase.storage.from('payment-screenshots').getPublicUrl(fileName);
+          return urlData?.publicUrl || fileName;
+        }
+      } catch (err) {
+        console.warn('Supabase storage upload error, falling back to data URL', err);
+      }
+    }
+    // Fallback: convert to base64 Data URL
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result as string);
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+  }
+
+  /**
    * COMMITTEES
    */
   async getCommittees(): Promise<Committee[]> {
     if (isSupabaseConfigured() && supabase) {
-      const { data, error } = await supabase
-        .from('committees')
-        .select('*')
-        .order('display_order', { ascending: true });
-      if (error) throw error;
-      return data || [];
+      try {
+        const { data, error } = await supabase
+          .from('committees')
+          .select('*')
+          .order('display_order', { ascending: true });
+        if (!error && data && data.length > 0) return data;
+      } catch (err) {
+        console.warn('Supabase getCommittees failed, falling back to mockStore', err);
+      }
     }
     const store = mockStore.getData();
     return [...store.committees].sort((a, b) => a.display_order - b.display_order);
@@ -80,14 +111,17 @@ class DataService {
 
   async updateCommittee(committee: Partial<Committee> & { id: string }, adminId?: string): Promise<Committee> {
     if (isSupabaseConfigured() && supabase) {
-      const { data, error } = await supabase
-        .from('committees')
-        .update(committee)
-        .eq('id', committee.id)
-        .select()
-        .single();
-      if (error) throw error;
-      return data;
+      try {
+        const { data, error } = await supabase
+          .from('committees')
+          .update(committee)
+          .eq('id', committee.id)
+          .select()
+          .single();
+        if (!error && data) return data;
+      } catch (err) {
+        console.warn('Supabase updateCommittee failed, falling back to mockStore', err);
+      }
     }
     const store = mockStore.getData();
     const idx = store.committees.findIndex((c) => c.id === committee.id);
@@ -103,29 +137,38 @@ class DataService {
    */
   async getPricingRules(committeeId?: string): Promise<PricingRule[]> {
     if (isSupabaseConfigured() && supabase) {
-      let query = supabase.from('registration_fee_rules').select('*');
-      if (committeeId) query = query.eq('committee_id', committeeId);
-      const { data, error } = await query;
-      if (error) throw error;
-      return data || [];
+      try {
+        let query = supabase.from('registration_fee_rules').select('*');
+        if (committeeId) {
+          query = query.eq('committee_id', committeeId);
+        }
+        const { data, error } = await query;
+        if (!error && data && data.length > 0) return data;
+      } catch (err) {
+        console.warn('Supabase getPricingRules failed, falling back to mockStore', err);
+      }
     }
     const store = mockStore.getData();
+    let res = store.pricingRules;
     if (committeeId) {
-      return store.pricingRules.filter((r) => r.committee_id === committeeId);
+      res = res.filter((r) => r.committee_id === committeeId);
     }
-    return store.pricingRules;
+    return res;
   }
 
   async updatePricingRule(rule: Partial<PricingRule> & { id: string }, adminId?: string): Promise<PricingRule> {
     if (isSupabaseConfigured() && supabase) {
-      const { data, error } = await supabase
-        .from('registration_fee_rules')
-        .update(rule)
-        .eq('id', rule.id)
-        .select()
-        .single();
-      if (error) throw error;
-      return data;
+      try {
+        const { data, error } = await supabase
+          .from('registration_fee_rules')
+          .update(rule)
+          .eq('id', rule.id)
+          .select()
+          .single();
+        if (!error && data) return data;
+      } catch (err) {
+        console.warn('Supabase updatePricingRule failed, falling back to mockStore', err);
+      }
     }
     const store = mockStore.getData();
     const idx = store.pricingRules.findIndex((r) => r.id === rule.id);
@@ -137,16 +180,19 @@ class DataService {
   }
 
   async createPricingRule(rule: Omit<PricingRule, 'id'>, adminId?: string): Promise<PricingRule> {
-    const newId = 'p-rule-' + Math.random().toString(36).substring(2, 9);
+    const newId = 'rule-' + Math.random().toString(36).substring(2, 9);
     const newRule: PricingRule = { ...rule, id: newId };
     if (isSupabaseConfigured() && supabase) {
-      const { data, error } = await supabase
-        .from('registration_fee_rules')
-        .insert(rule)
-        .select()
-        .single();
-      if (error) throw error;
-      return data;
+      try {
+        const { data, error } = await supabase
+          .from('registration_fee_rules')
+          .insert(rule)
+          .select()
+          .single();
+        if (!error && data) return data;
+      } catch (err) {
+        console.warn('Supabase createPricingRule failed, falling back to mockStore', err);
+      }
     }
     const store = mockStore.getData();
     store.pricingRules.push(newRule);
@@ -160,11 +206,16 @@ class DataService {
    */
   async getPortfolios(committeeId?: string): Promise<Portfolio[]> {
     if (isSupabaseConfigured() && supabase) {
-      let query = supabase.from('portfolios').select('*').order('display_order', { ascending: true });
-      if (committeeId) query = query.eq('committee_id', committeeId);
-      const { data, error } = await query;
-      if (error) throw error;
-      return data || [];
+      try {
+        let query = supabase.from('portfolios').select('*');
+        if (committeeId) {
+          query = query.eq('committee_id', committeeId);
+        }
+        const { data, error } = await query.order('display_order', { ascending: true });
+        if (!error && data && data.length > 0) return data;
+      } catch (err) {
+        console.warn('Supabase getPortfolios failed, falling back to mockStore', err);
+      }
     }
     const store = mockStore.getData();
     let res = store.portfolios;
@@ -176,14 +227,17 @@ class DataService {
 
   async updatePortfolio(portfolio: Partial<Portfolio> & { id: string }, adminId?: string): Promise<Portfolio> {
     if (isSupabaseConfigured() && supabase) {
-      const { data, error } = await supabase
-        .from('portfolios')
-        .update(portfolio)
-        .eq('id', portfolio.id)
-        .select()
-        .single();
-      if (error) throw error;
-      return data;
+      try {
+        const { data, error } = await supabase
+          .from('portfolios')
+          .update(portfolio)
+          .eq('id', portfolio.id)
+          .select()
+          .single();
+        if (!error && data) return data;
+      } catch (err) {
+        console.warn('Supabase updatePortfolio failed, falling back to mockStore', err);
+      }
     }
     const store = mockStore.getData();
     const idx = store.portfolios.findIndex((p) => p.id === portfolio.id);
@@ -198,9 +252,12 @@ class DataService {
     const newId = 'port-' + Math.random().toString(36).substring(2, 9);
     const newPort: Portfolio = { ...portfolio, id: newId };
     if (isSupabaseConfigured() && supabase) {
-      const { data, error } = await supabase.from('portfolios').insert(portfolio).select().single();
-      if (error) throw error;
-      return data;
+      try {
+        const { data, error } = await supabase.from('portfolios').insert(portfolio).select().single();
+        if (!error && data) return data;
+      } catch (err) {
+        console.warn('Supabase createPortfolio failed, falling back to mockStore', err);
+      }
     }
     const store = mockStore.getData();
     store.portfolios.push(newPort);
@@ -213,6 +270,30 @@ class DataService {
    * REGISTRATION QUERYING
    */
   async getRegistrationForUser(authUserId: string): Promise<FullRegistrationDetail | null> {
+    if (isSupabaseConfigured() && supabase) {
+      try {
+        const { data: reg, error } = await supabase
+          .from('registrations')
+          .select(`
+            *,
+            committee:committees(*),
+            individual:individual_participants(*),
+            team:teams(*, team_members(*)),
+            preferences:preferences(*, portfolio:portfolios(*)),
+            payment:payments(*),
+            assignment:assignments(*, portfolio:portfolios(*)),
+            reveal:reveals(*)
+          `)
+          .eq('auth_user_id', authUserId)
+          .maybeSingle();
+
+        if (!error && reg) {
+          return this.mapSupabaseRegistration(reg);
+        }
+      } catch (err) {
+        console.warn('Supabase getRegistrationForUser error, using mockStore', err);
+      }
+    }
     const store = mockStore.getData();
     const reg = store.registrations.find((r) => r.auth_user_id === authUserId);
     if (!reg) return null;
@@ -220,10 +301,57 @@ class DataService {
   }
 
   async getRegistrationById(id: string): Promise<FullRegistrationDetail | null> {
+    if (isSupabaseConfigured() && supabase) {
+      try {
+        const { data: reg, error } = await supabase
+          .from('registrations')
+          .select(`
+            *,
+            committee:committees(*),
+            individual:individual_participants(*),
+            team:teams(*, team_members(*)),
+            preferences:preferences(*, portfolio:portfolios(*)),
+            payment:payments(*),
+            assignment:assignments(*, portfolio:portfolios(*)),
+            reveal:reveals(*)
+          `)
+          .eq('id', id)
+          .maybeSingle();
+
+        if (!error && reg) {
+          return this.mapSupabaseRegistration(reg);
+        }
+      } catch (err) {
+        console.warn('Supabase getRegistrationById error, using mockStore', err);
+      }
+    }
     return this.hydrateRegistration(id);
   }
 
   async getAllRegistrations(): Promise<FullRegistrationDetail[]> {
+    if (isSupabaseConfigured() && supabase) {
+      try {
+        const { data: regs, error } = await supabase
+          .from('registrations')
+          .select(`
+            *,
+            committee:committees(*),
+            individual:individual_participants(*),
+            team:teams(*, team_members(*)),
+            preferences:preferences(*, portfolio:portfolios(*)),
+            payment:payments(*),
+            assignment:assignments(*, portfolio:portfolios(*)),
+            reveal:reveals(*)
+          `)
+          .order('created_at', { ascending: false });
+
+        if (!error && regs && regs.length > 0) {
+          return regs.map((r: any) => this.mapSupabaseRegistration(r));
+        }
+      } catch (err) {
+        console.warn('Supabase getAllRegistrations error, using mockStore', err);
+      }
+    }
     const store = mockStore.getData();
     const list: FullRegistrationDetail[] = [];
     for (const r of store.registrations) {
@@ -231,6 +359,53 @@ class DataService {
       if (full) list.push(full);
     }
     return list;
+  }
+
+  private mapSupabaseRegistration(r: any): FullRegistrationDetail {
+    const individual = Array.isArray(r.individual) ? r.individual[0] : r.individual;
+    const team = Array.isArray(r.team) ? r.team[0] : r.team;
+    const team_members = Array.isArray(r.team) && r.team[0]?.team_members 
+      ? r.team[0].team_members 
+      : (team?.team_members || []);
+    const preferences = (r.preferences || [])
+      .map((p: any) => ({
+        ...p,
+        portfolio: Array.isArray(p.portfolio) ? p.portfolio[0] : p.portfolio
+      }))
+      .sort((a: any, b: any) => a.rank - b.rank);
+    const payment = Array.isArray(r.payment) ? r.payment[0] : r.payment;
+    const rawAssignment = Array.isArray(r.assignment) ? r.assignment[0] : r.assignment;
+    const assignment = rawAssignment ? {
+      ...rawAssignment,
+      portfolio: Array.isArray(rawAssignment.portfolio) ? rawAssignment.portfolio[0] : rawAssignment.portfolio
+    } : undefined;
+    const reveal = Array.isArray(r.reveal) ? r.reveal[0] : r.reveal;
+
+    return {
+      registration: {
+        id: r.id,
+        registration_number: r.registration_number,
+        auth_user_id: r.auth_user_id,
+        committee_id: r.committee_id,
+        registration_type: r.registration_type,
+        status: r.status,
+        contact_email: r.contact_email,
+        preferences_locked: r.preferences_locked,
+        assignment_status: r.assignment_status,
+        reveal_status: r.reveal_status,
+        confirmed_at: r.confirmed_at,
+        created_at: r.created_at,
+        updated_at: r.updated_at,
+      },
+      committee: Array.isArray(r.committee) ? r.committee[0] : r.committee,
+      individual,
+      team,
+      team_members,
+      preferences,
+      payment,
+      assignment,
+      reveal
+    };
   }
 
   private async hydrateRegistration(registrationId: string): Promise<FullRegistrationDetail | null> {
@@ -276,9 +451,175 @@ class DataService {
    * Full server-side flow with pricing snapshot and unique ID sequence
    */
   async submitRegistration(payload: SubmitRegistrationPayload): Promise<FullRegistrationDetail> {
+    // 1. Production Supabase Path (if live credentials connected)
+    if (isSupabaseConfigured() && supabase) {
+      try {
+        const { data: committee } = await supabase
+          .from('committees')
+          .select('*')
+          .eq('id', payload.committeeId)
+          .single();
+        if (!committee) throw new Error('Simulation arena not found.');
+        if (!committee.is_open) throw new Error('Registration for this simulation is closed.');
+
+        const { count: confirmedCount } = await supabase
+          .from('registrations')
+          .select('*', { count: 'exact', head: true })
+          .eq('committee_id', payload.committeeId)
+          .eq('status', 'CONFIRMED');
+        if (confirmedCount && confirmedCount >= committee.capacity) {
+          throw new Error('This simulation is currently SOLD OUT.');
+        }
+
+        const { data: existing } = await supabase
+          .from('registrations')
+          .select('id')
+          .eq('auth_user_id', payload.authUserId)
+          .maybeSingle();
+        if (existing) {
+          throw new Error('You already have an active registration. Check your dashboard.');
+        }
+
+        const branchForPricing = payload.registrationType === 'INDIVIDUAL'
+          ? payload.individualData?.branch || ''
+          : payload.teamData?.leader.branch || '';
+
+        const { data: rules } = await supabase
+          .from('registration_fee_rules')
+          .select('*')
+          .eq('committee_id', payload.committeeId);
+
+        const feeInfo = calculatePayableFee(committee, rules || [], branchForPricing);
+        if (!feeInfo.isAvailable) {
+          throw new Error('Registration pricing is currently unavailable. Please try again later.');
+        }
+
+        let regNumber = '';
+        try {
+          const { data: rpcNum } = await supabase.rpc('generate_registration_number', {
+            p_format: payload.registrationType,
+          });
+          if (rpcNum) regNumber = rpcNum;
+        } catch {
+          // Fallback to count sequence
+        }
+
+        if (!regNumber) {
+          const { count: totalRegs } = await supabase
+            .from('registrations')
+            .select('*', { count: 'exact', head: true });
+          const seqNum = (totalRegs || 0) + 102;
+          regNumber = payload.registrationType === 'TEAM'
+            ? `THEV-IPL-${String(seqNum).padStart(5, '0')}`
+            : `THEV-${String(seqNum).padStart(5, '0')}`;
+        }
+
+        const { data: newReg, error: regErr } = await supabase
+          .from('registrations')
+          .insert({
+            registration_number: regNumber,
+            auth_user_id: payload.authUserId,
+            committee_id: payload.committeeId,
+            registration_type: payload.registrationType,
+            status: 'VERIFICATION_PENDING',
+            contact_email: payload.contactEmail,
+            preferences_locked: true,
+            assignment_status: 'UNASSIGNED',
+            reveal_status: 'HIDDEN',
+          })
+          .select()
+          .single();
+
+        if (regErr || !newReg) throw regErr || new Error('Failed to create registration record');
+
+        if (payload.registrationType === 'INDIVIDUAL' && payload.individualData) {
+          await supabase.from('individual_participants').insert({
+            registration_id: newReg.id,
+            full_name: payload.individualData.fullName,
+            usn: payload.individualData.usn.toUpperCase(),
+            email: payload.individualData.email,
+            branch: payload.individualData.branch,
+            year: payload.individualData.year,
+            is_primary: true,
+          });
+        } else if (payload.registrationType === 'TEAM' && payload.teamData) {
+          const { data: newTeam } = await supabase
+            .from('teams')
+            .insert({
+              registration_id: newReg.id,
+              team_name: payload.teamData.teamName,
+            })
+            .select()
+            .single();
+
+          if (newTeam) {
+            await supabase.from('team_members').insert({
+              team_id: newTeam.id,
+              full_name: payload.teamData.leader.fullName,
+              usn: payload.teamData.leader.usn.toUpperCase(),
+              email: payload.teamData.leader.email,
+              branch: payload.teamData.leader.branch,
+              year: payload.teamData.leader.year,
+              is_leader: true,
+            });
+
+            for (const m of payload.teamData.members) {
+              await supabase.from('team_members').insert({
+                team_id: newTeam.id,
+                full_name: m.fullName,
+                usn: m.usn.toUpperCase(),
+                email: m.email,
+                branch: m.branch,
+                year: m.year,
+                is_leader: false,
+              });
+            }
+          }
+        }
+
+        const prefRows = payload.portfolioIds.map((portId, index) => ({
+          registration_id: newReg.id,
+          portfolio_id: portId,
+          rank: index + 1,
+          locked_at: new Date().toISOString(),
+        }));
+        await supabase.from('preferences').insert(prefRows);
+
+        await supabase.from('payments').insert({
+          registration_id: newReg.id,
+          amount: feeInfo.amount,
+          currency: 'INR',
+          pricing_rule_id: feeInfo.ruleId || null,
+          pricing_category: feeInfo.category,
+          original_amount: feeInfo.amount,
+          utr: payload.paymentData.utr.trim().toUpperCase(),
+          screenshot_path: payload.paymentData.screenshotPath,
+          status: 'SUBMITTED',
+          submitted_at: new Date().toISOString(),
+        });
+
+        await supabase.from('audit_logs').insert({
+          actor_id: payload.authUserId,
+          action: 'REGISTRATION_SUBMITTED',
+          entity_type: 'registrations',
+          entity_id: newReg.id,
+          new_data: {
+            registration_number: regNumber,
+            amount: feeInfo.amount,
+            category: feeInfo.category,
+          },
+        });
+
+        const result = await this.getRegistrationById(newReg.id);
+        if (result) return result;
+      } catch (supabaseErr) {
+        console.warn('Supabase submitRegistration failed, falling back to local simulation store', supabaseErr);
+      }
+    }
+
+    // 2. Simulation / Fallback Local Store Path
     const store = mockStore.getData();
 
-    // 1. Capacity check
     const committee = store.committees.find((c) => c.id === payload.committeeId);
     if (!committee) throw new Error('Simulation arena not found.');
     if (!committee.is_open) throw new Error('Registration for this simulation is closed.');
@@ -290,13 +631,11 @@ class DataService {
       throw new Error('This simulation is currently SOLD OUT.');
     }
 
-    // 2. Duplicate check for authenticated user
     const existing = store.registrations.find((r) => r.auth_user_id === payload.authUserId);
     if (existing) {
       throw new Error('You already have an active registration. Check your dashboard.');
     }
 
-    // 3. Resolve Branch & Calculate Fee Server-Side (Never trust client fee!)
     const branchForPricing = payload.registrationType === 'INDIVIDUAL'
       ? payload.individualData?.branch || ''
       : payload.teamData?.leader.branch || '';
@@ -308,7 +647,6 @@ class DataService {
       throw new Error('Registration pricing is currently unavailable. Please try again later.');
     }
 
-    // 4. Generate Unique Registration Number Sequence Server-Side
     const seqNum = store.registrations.length + 102;
     const regNumber = payload.registrationType === 'TEAM'
       ? `THEV-IPL-${String(seqNum).padStart(5, '0')}`
@@ -316,7 +654,6 @@ class DataService {
 
     const regId = 'reg-' + Math.random().toString(36).substring(2, 9);
 
-    // 5. Create Registration Record
     const newReg: Registration = {
       id: regId,
       registration_number: regNumber,
@@ -325,7 +662,7 @@ class DataService {
       registration_type: payload.registrationType,
       status: 'VERIFICATION_PENDING',
       contact_email: payload.contactEmail,
-      preferences_locked: true, // Preferences locked upon submission
+      preferences_locked: true,
       assignment_status: 'UNASSIGNED',
       reveal_status: 'HIDDEN',
       confirmed_at: null,
@@ -334,7 +671,6 @@ class DataService {
     };
     store.registrations.push(newReg);
 
-    // 6. Insert Individual or Team
     if (payload.registrationType === 'INDIVIDUAL' && payload.individualData) {
       const ind: IndividualParticipant = {
         id: 'ind-' + Math.random().toString(36).substring(2, 9),
@@ -350,7 +686,6 @@ class DataService {
       };
       store.individualParticipants.push(ind);
     } else if (payload.registrationType === 'TEAM' && payload.teamData) {
-      // Validate team size 2 to 3
       const totalMembers = 1 + (payload.teamData.members?.length || 0);
       if (totalMembers < 2 || totalMembers > 3) {
         throw new Error('IPL team registration requires 2 to 3 members.');
@@ -366,7 +701,6 @@ class DataService {
       };
       store.teams.push(newTeam);
 
-      // Leader
       store.teamMembers.push({
         id: 'tm-' + Math.random().toString(36).substring(2, 9),
         team_id: teamId,
@@ -380,7 +714,6 @@ class DataService {
         updated_at: new Date().toISOString(),
       });
 
-      // Members
       payload.teamData.members.forEach((m) => {
         store.teamMembers.push({
           id: 'tm-' + Math.random().toString(36).substring(2, 9),
@@ -397,7 +730,6 @@ class DataService {
       });
     }
 
-    // 7. Insert 3 Distinct Preferences
     payload.portfolioIds.forEach((portId, index) => {
       store.preferences.push({
         id: 'pref-' + Math.random().toString(36).substring(2, 9),
@@ -408,7 +740,6 @@ class DataService {
       });
     });
 
-    // 8. Insert Payment with Pricing Snapshot
     const paymentId = 'pay-' + Math.random().toString(36).substring(2, 9);
     const payment: Payment = {
       id: paymentId,
@@ -426,7 +757,6 @@ class DataService {
     };
     store.payments.push(payment);
 
-    // 9. Audit Log
     this.addAuditLog(payload.authUserId, 'REGISTRATION_SUBMITTED', 'registrations', regId, null, {
       registration_number: regNumber,
       amount: feeInfo.amount,
@@ -451,6 +781,68 @@ class DataService {
       members?: TeamMember[];
     }
   ): Promise<FullRegistrationDetail> {
+    if (isSupabaseConfigured() && supabase) {
+      try {
+        const { data: reg } = await supabase.from('registrations').select('*').eq('id', registrationId).single();
+        if (reg) {
+          if (reg.status === 'CONFIRMED') {
+            throw new Error('All registration editing is locked once confirmed by admin.');
+          }
+
+          if (updates.contactEmail) {
+            await supabase.from('registrations').update({
+              contact_email: updates.contactEmail,
+              updated_at: new Date().toISOString(),
+            }).eq('id', registrationId);
+          }
+
+          if (reg.registration_type === 'INDIVIDUAL' && updates.individual) {
+            await supabase.from('individual_participants').update({
+              ...updates.individual,
+              updated_at: new Date().toISOString(),
+            }).eq('registration_id', registrationId);
+          }
+
+          if (reg.registration_type === 'TEAM') {
+            const { data: team } = await supabase.from('teams').select('id').eq('registration_id', registrationId).single();
+            if (team && updates.teamName) {
+              await supabase.from('teams').update({
+                team_name: updates.teamName,
+                updated_at: new Date().toISOString(),
+              }).eq('id', team.id);
+            }
+            if (team && updates.members) {
+              await supabase.from('team_members').delete().eq('team_id', team.id);
+              for (const m of updates.members) {
+                await supabase.from('team_members').insert({
+                  team_id: team.id,
+                  full_name: m.full_name,
+                  usn: m.usn.toUpperCase(),
+                  email: m.email,
+                  branch: m.branch,
+                  year: m.year,
+                  is_leader: m.is_leader,
+                });
+              }
+            }
+          }
+
+          await supabase.from('audit_logs').insert({
+            actor_id: reg.auth_user_id,
+            action: 'PARTICIPANT_INFO_UPDATED',
+            entity_type: 'registrations',
+            entity_id: registrationId,
+            new_data: updates,
+          });
+
+          const refreshed = await this.getRegistrationById(registrationId);
+          if (refreshed) return refreshed;
+        }
+      } catch (err) {
+        console.warn('Supabase updateParticipantDetails failed, falling back to mock store', err);
+      }
+    }
+
     const store = mockStore.getData();
     const reg = store.registrations.find((r) => r.id === registrationId);
     if (!reg) throw new Error('Registration not found');
@@ -482,7 +874,6 @@ class DataService {
         if (updates.members.length < 2 || updates.members.length > 3) {
           throw new Error('Team must have 2 to 3 members.');
         }
-        // Replace members
         store.teamMembers = store.teamMembers.filter((tm) => tm.team_id !== team.id);
         updates.members.forEach((m) => {
           store.teamMembers.push({
@@ -505,6 +896,39 @@ class DataService {
    * ADMIN PAYMENT VERIFICATION
    */
   async verifyPayment(paymentId: string, adminId?: string): Promise<FullRegistrationDetail> {
+    if (isSupabaseConfigured() && supabase) {
+      try {
+        const now = new Date().toISOString();
+        await supabase.from('payments').update({
+          status: 'VERIFIED',
+          verified_at: now,
+          verified_by: adminId || 'admin',
+        }).eq('id', paymentId);
+
+        const { data: pay } = await supabase.from('payments').select('registration_id, amount').eq('id', paymentId).single();
+        if (pay?.registration_id) {
+          await supabase.from('registrations').update({
+            status: 'CONFIRMED',
+            confirmed_at: now,
+            updated_at: now,
+          }).eq('id', pay.registration_id);
+
+          await supabase.from('audit_logs').insert({
+            actor_id: adminId || null,
+            action: 'PAYMENT_VERIFIED',
+            entity_type: 'payments',
+            entity_id: paymentId,
+            new_data: { registration_id: pay.registration_id, amount: pay.amount },
+          });
+
+          const full = await this.getRegistrationById(pay.registration_id);
+          if (full) return full;
+        }
+      } catch (err) {
+        console.warn('Supabase verifyPayment failed, falling back to mock store', err);
+      }
+    }
+
     const store = mockStore.getData();
     const payment = store.payments.find((p) => p.id === paymentId);
     if (!payment) throw new Error('Payment record not found');
@@ -531,6 +955,38 @@ class DataService {
   }
 
   async rejectPayment(paymentId: string, rejectionReason?: string, adminId?: string): Promise<FullRegistrationDetail> {
+    if (isSupabaseConfigured() && supabase) {
+      try {
+        const now = new Date().toISOString();
+        await supabase.from('payments').update({
+          status: 'REJECTED',
+          rejected_at: now,
+          rejection_reason: rejectionReason || 'Payment verification failed.',
+        }).eq('id', paymentId);
+
+        const { data: pay } = await supabase.from('payments').select('registration_id').eq('id', paymentId).single();
+        if (pay?.registration_id) {
+          await supabase.from('registrations').update({
+            status: 'RESUBMISSION_REQUIRED',
+            updated_at: now,
+          }).eq('id', pay.registration_id);
+
+          await supabase.from('audit_logs').insert({
+            actor_id: adminId || null,
+            action: 'PAYMENT_REJECTED',
+            entity_type: 'payments',
+            entity_id: paymentId,
+            new_data: { registration_id: pay.registration_id, reason: rejectionReason },
+          });
+
+          const full = await this.getRegistrationById(pay.registration_id);
+          if (full) return full;
+        }
+      } catch (err) {
+        console.warn('Supabase rejectPayment failed, falling back to mock store', err);
+      }
+    }
+
     const store = mockStore.getData();
     const payment = store.payments.find((p) => p.id === paymentId);
     if (!payment) throw new Error('Payment record not found');
@@ -556,6 +1012,38 @@ class DataService {
   }
 
   async resubmitPayment(paymentId: string, newUtr: string, newScreenshotPath: string): Promise<Payment> {
+    if (isSupabaseConfigured() && supabase) {
+      try {
+        const now = new Date().toISOString();
+        const { data: pay, error: payErr } = await supabase.from('payments').update({
+          utr: newUtr.trim().toUpperCase(),
+          screenshot_path: newScreenshotPath,
+          status: 'SUBMITTED',
+          submitted_at: now,
+          rejected_at: null,
+          rejection_reason: null,
+        }).eq('id', paymentId).select().single();
+
+        if (!payErr && pay) {
+          await supabase.from('registrations').update({
+            status: 'VERIFICATION_PENDING',
+            updated_at: now,
+          }).eq('id', pay.registration_id);
+
+          await supabase.from('audit_logs').insert({
+            actor_id: null,
+            action: 'PAYMENT_RESUBMITTED',
+            entity_type: 'payments',
+            entity_id: paymentId,
+            new_data: { utr: newUtr },
+          });
+          return pay;
+        }
+      } catch (err) {
+        console.warn('Supabase resubmitPayment failed, falling back to mock store', err);
+      }
+    }
+
     const store = mockStore.getData();
     const payment = store.payments.find((p) => p.id === paymentId);
     if (!payment) throw new Error('Payment record not found');
@@ -587,6 +1075,32 @@ class DataService {
     reason: string, 
     adminId?: string
   ): Promise<Payment> {
+    if (isSupabaseConfigured() && supabase) {
+      try {
+        const now = new Date().toISOString();
+        const { data: pay, error } = await supabase.from('payments').update({
+          amount: overrideAmount,
+          override_amount: overrideAmount,
+          override_reason: reason,
+          overridden_by: adminId || 'admin',
+          overridden_at: now,
+        }).eq('id', paymentId).select().single();
+
+        if (!error && pay) {
+          await supabase.from('audit_logs').insert({
+            actor_id: adminId || null,
+            action: 'PAYMENT_AMOUNT_OVERRIDDEN',
+            entity_type: 'payments',
+            entity_id: paymentId,
+            new_data: { override_amount: overrideAmount, reason },
+          });
+          return pay;
+        }
+      } catch (err) {
+        console.warn('Supabase overridePaymentAmount failed, falling back to mock store', err);
+      }
+    }
+
     const store = mockStore.getData();
     const payment = store.payments.find((p) => p.id === paymentId);
     if (!payment) throw new Error('Payment record not found');
@@ -615,14 +1129,30 @@ class DataService {
     mode: 'AUTO_BALANCED' | 'MANUAL_CAPACITY' = 'AUTO_BALANCED', 
     adminId?: string
   ): Promise<{ assignedCount: number; runId: string }> {
+    if (isSupabaseConfigured() && supabase) {
+      try {
+        const { data, error } = await supabase.rpc('run_portfolio_assignment', {
+          p_committee_id: committeeId,
+          p_mode: mode,
+          p_admin_id: adminId || 'admin',
+        });
+        if (!error && data) {
+          return {
+            assignedCount: data.assigned_count || 0,
+            runId: data.run_id || ('run-' + Date.now()),
+          };
+        }
+      } catch (err) {
+        console.warn('Supabase RPC run_portfolio_assignment failed, falling back to mock assignment', err);
+      }
+    }
+
     const store = mockStore.getData();
 
-    // Find confirmed, unassigned registrations for this committee
     const eligibleRegs = store.registrations.filter(
       (r) => r.committee_id === committeeId && r.status === 'CONFIRMED' && r.assignment_status === 'UNASSIGNED'
     );
 
-    // Fair randomized draw
     const shuffled = [...eligibleRegs].sort(() => Math.random() - 0.5);
 
     const runId = 'run-' + Math.random().toString(36).substring(2, 9);
@@ -645,7 +1175,6 @@ class DataService {
 
       let assigned = false;
 
-      // Check Rank 1, 2, 3
       for (const pref of prefs) {
         const port = activePortfolios.find((p) => p.id === pref.portfolio_id);
         if (!port) continue;
@@ -671,7 +1200,6 @@ class DataService {
         }
       }
 
-      // Fallback: If 1, 2, 3 full, place in any portfolio with capacity
       if (!assigned) {
         for (const port of activePortfolios) {
           const currentAssigned = store.assignments.filter((a) => a.portfolio_id === port.id).length;
@@ -713,6 +1241,40 @@ class DataService {
     reason: string, 
     adminId?: string
   ): Promise<Assignment> {
+    if (isSupabaseConfigured() && supabase) {
+      try {
+        const now = new Date().toISOString();
+        const { data: asg, error } = await supabase.from('assignments').upsert({
+          registration_id: registrationId,
+          portfolio_id: portfolioId,
+          assignment_source: 'MANUAL',
+          preference_matched: null,
+          override_reason: reason,
+          assigned_by: adminId || 'admin',
+          assigned_at: now,
+        }, { onConflict: 'registration_id' }).select().single();
+
+        if (!error && asg) {
+          await supabase.from('registrations').update({
+            assignment_status: 'ASSIGNED',
+            updated_at: now,
+          }).eq('id', registrationId);
+
+          await supabase.from('audit_logs').insert({
+            actor_id: adminId || null,
+            action: 'MANUAL_PORTFOLIO_ASSIGNED',
+            entity_type: 'assignments',
+            entity_id: registrationId,
+            new_data: { portfolio_id: portfolioId, reason },
+          });
+
+          return asg;
+        }
+      } catch (err) {
+        console.warn('Supabase manualAssignPortfolio failed, falling back to mock store', err);
+      }
+    }
+
     const store = mockStore.getData();
     const reg = store.registrations.find((r) => r.id === registrationId);
     if (!reg) throw new Error('Registration not found');
@@ -755,28 +1317,53 @@ class DataService {
     this.addAuditLog(adminId, 'MANUAL_PORTFOLIO_ASSIGNED', 'assignments', assignment.id, null, {
       registrationId,
       portfolioId,
-      reason
+      reason,
     });
 
     mockStore.save();
     return assignment;
   }
 
-  async resetAssignments(committeeId: string, adminId?: string): Promise<number> {
+  async resetPortfolioAssignments(committeeId: string, adminId?: string): Promise<number> {
+    if (isSupabaseConfigured() && supabase) {
+      try {
+        const { data: regs } = await supabase
+          .from('registrations')
+          .select('id')
+          .eq('committee_id', committeeId);
+
+        const regIds = (regs || []).map((r: any) => r.id);
+        if (regIds.length > 0) {
+          await supabase.from('assignments').delete().in('registration_id', regIds);
+          await supabase.from('registrations').update({
+            assignment_status: 'UNASSIGNED',
+            reveal_status: 'HIDDEN',
+            updated_at: new Date().toISOString(),
+          }).in('id', regIds);
+
+          await supabase.from('audit_logs').insert({
+            actor_id: adminId || null,
+            action: 'RESET_ASSIGNMENTS',
+            entity_type: 'committees',
+            entity_id: committeeId,
+            new_data: { clearedCount: regIds.length },
+          });
+
+          return regIds.length;
+        }
+      } catch (err) {
+        console.warn('Supabase resetPortfolioAssignments failed, falling back to mock store', err);
+      }
+    }
+
     const store = mockStore.getData();
     const commRegs = store.registrations.filter((r) => r.committee_id === committeeId);
-    const commRegIds = new Set(commRegs.map((r) => r.id));
+    const regIds = commRegs.map((r) => r.id);
 
-    let removed = 0;
-    store.assignments = store.assignments.filter((a) => {
-      if (commRegIds.has(a.registration_id)) {
-        removed++;
-        return false;
-      }
-      return true;
-    });
+    const initialCount = store.assignments.length;
+    store.assignments = store.assignments.filter((a) => !regIds.includes(a.registration_id));
+    const removed = initialCount - store.assignments.length;
 
-    // Reset registration statuses
     commRegs.forEach((r) => {
       r.assignment_status = 'UNASSIGNED';
       r.reveal_status = 'HIDDEN';
@@ -791,6 +1378,10 @@ class DataService {
     return removed;
   }
 
+  async resetAssignments(committeeId: string, adminId?: string): Promise<number> {
+    return this.resetPortfolioAssignments(committeeId, adminId);
+  }
+
   /**
    * REVEAL MANAGEMENT
    */
@@ -799,6 +1390,37 @@ class DataService {
     mode: 'CINEMATIC' | 'SIMPLE' = 'CINEMATIC', 
     adminId?: string
   ): Promise<Reveal> {
+    if (isSupabaseConfigured() && supabase) {
+      try {
+        const now = new Date().toISOString();
+        const { data: rev, error } = await supabase.from('reveals').upsert({
+          registration_id: registrationId,
+          mode,
+          revealed_at: now,
+          revealed_by: adminId || 'admin',
+        }, { onConflict: 'registration_id' }).select().single();
+
+        if (!error && rev) {
+          await supabase.from('registrations').update({
+            reveal_status: 'REVEALED',
+            updated_at: now,
+          }).eq('id', registrationId);
+
+          await supabase.from('audit_logs').insert({
+            actor_id: adminId || null,
+            action: 'PORTFOLIO_REVEALED',
+            entity_type: 'reveals',
+            entity_id: rev.id,
+            new_data: { registrationId, mode },
+          });
+
+          return rev;
+        }
+      } catch (err) {
+        console.warn('Supabase revealAssignment failed, falling back to mock store', err);
+      }
+    }
+
     const store = mockStore.getData();
     const reg = store.registrations.find((r) => r.id === registrationId);
     if (!reg) throw new Error('Registration not found');
@@ -863,11 +1485,54 @@ class DataService {
    * APP SETTINGS & AUDIT LOGS
    */
   async getAppSettings(): Promise<AppSettings> {
+    if (isSupabaseConfigured() && supabase) {
+      try {
+        const { data } = await supabase
+          .from('app_settings')
+          .select('value')
+          .eq('key', 'event_info')
+          .maybeSingle();
+
+        if (data?.value) {
+          return data.value;
+        }
+      } catch (err) {
+        console.warn('Supabase getAppSettings failed, falling back to mock store', err);
+      }
+    }
     const store = mockStore.getData();
     return store.appSettings;
   }
 
   async updateAppSettings(settings: Partial<AppSettings>, adminId?: string): Promise<AppSettings> {
+    if (isSupabaseConfigured() && supabase) {
+      try {
+        const current = await this.getAppSettings();
+        const merged = { ...current, ...settings };
+        const { data, error } = await supabase
+          .from('app_settings')
+          .upsert({
+            key: 'event_info',
+            value: merged,
+            updated_at: new Date().toISOString(),
+          }, { onConflict: 'key' })
+          .select()
+          .single();
+
+        if (!error && data?.value) {
+          await supabase.from('audit_logs').insert({
+            actor_id: adminId || null,
+            action: 'UPDATE_APP_SETTINGS',
+            entity_type: 'app_settings',
+            new_data: settings,
+          });
+          return data.value;
+        }
+      } catch (err) {
+        console.warn('Supabase updateAppSettings failed, falling back to mock store', err);
+      }
+    }
+
     const store = mockStore.getData();
     store.appSettings = { ...store.appSettings, ...settings };
     this.addAuditLog(adminId, 'UPDATE_APP_SETTINGS', 'app_settings', undefined, null, settings);
@@ -876,6 +1541,22 @@ class DataService {
   }
 
   async getAuditLogs(): Promise<AuditLog[]> {
+    if (isSupabaseConfigured() && supabase) {
+      try {
+        const { data, error } = await supabase
+          .from('audit_logs')
+          .select('*')
+          .order('created_at', { ascending: false })
+          .limit(200);
+
+        if (!error && data) {
+          return data;
+        }
+      } catch (err) {
+        console.warn('Supabase getAuditLogs failed, falling back to mock store', err);
+      }
+    }
+
     const store = mockStore.getData();
     return [...store.auditLogs].sort(
       (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()

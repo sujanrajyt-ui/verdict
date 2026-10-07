@@ -134,14 +134,19 @@ export const DashboardPage: React.FC = () => {
     }
   };
 
-  const handleScreenshotUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleScreenshotUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      setNewScreenshot(reader.result as string);
-    };
-    reader.readAsDataURL(file);
+    try {
+      const uploaded = await dataService.uploadPaymentScreenshot(file, registrationDetail?.registration.registration_number);
+      setNewScreenshot(uploaded);
+    } catch {
+      const reader = new FileReader();
+      reader.onload = () => {
+        setNewScreenshot(reader.result as string);
+      };
+      reader.readAsDataURL(file);
+    }
   };
 
   if (loading) {

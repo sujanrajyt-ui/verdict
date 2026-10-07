@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Committee, PricingRule, AppSettings } from '../../types';
 import { calculatePayableFee, formatCurrency } from '../../utils/pricing';
+import { dataService } from '../../services/dataService';
 import { 
   CreditCard, 
   QrCode, 
@@ -47,7 +48,9 @@ export const Stage04SecureEntry: React.FC<Stage04SecureEntryProps> = ({
   // Authoritative dynamic price calculation
   const feeCalculation = calculatePayableFee(committee, pricingRules, branch);
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const [isUploading, setIsUploading] = useState<boolean>(false);
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
@@ -64,15 +67,17 @@ export const Stage04SecureEntry: React.FC<Stage04SecureEntryProps> = ({
     }
 
     setLocalError(null);
+    setIsUploading(true);
 
-    // Read base64 / blob preview
-    const reader = new FileReader();
-    reader.onload = () => {
-      const result = reader.result as string;
-      setFilePreview(result);
-      onUpdatePayment(utr, result);
-    };
-    reader.readAsDataURL(file);
+    try {
+      const uploadedPath = await dataService.uploadPaymentScreenshot(file);
+      setFilePreview(uploadedPath);
+      onUpdatePayment(utr, uploadedPath);
+    } catch {
+      setLocalError('Failed to process image receipt. Please try again.');
+    } finally {
+      setIsUploading(false);
+    }
   };
 
   const handleUtrChange = (value: string) => {
